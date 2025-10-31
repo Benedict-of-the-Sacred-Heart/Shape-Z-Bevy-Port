@@ -1,0 +1,12 @@
+[package]
+name = "shapez_bevy"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "shapez_bevy"
+path = "src/lib.rs"
+
+[dependencies]
+bevy = { version = "0.17", default-features = true }
+shapezlib = { path = "../shapezlib" }

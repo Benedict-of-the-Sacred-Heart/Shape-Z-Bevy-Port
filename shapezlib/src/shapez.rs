@@ -226,6 +226,12 @@ impl ShapeZ {
         println!("OBJ written to: {:?}.", path);
     }
 
+    /// Return mesh triangles and per-face material IDs from the current voxel grid.
+    pub fn mesh_triangles(&self) -> (Vec<[f32; 3]>, Vec<u32>, Vec<u8>) {
+        let grid = self.context.program.grid.read().unwrap();
+        crate::mesh::mesh_voxel_grid_with_materials(&grid)
+    }
+
     /// Write the image to disc.
     pub fn write_image(&self) {
         let mut path = self.path.clone();
