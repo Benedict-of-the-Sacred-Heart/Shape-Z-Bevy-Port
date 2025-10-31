@@ -1,0 +1,48 @@
+config density {
+    120;
+}
+
+config background {
+    0.45;
+}
+
+config sun_dir {
+    vec3(0.6, 1.0, 0.4);
+}
+
+config sun_emission {
+    vec3(4.0, 3.5, 3.0);
+}
+
+camera Isometric {
+    center {
+        vec3(0.0, 0.6, 0.0);
+    }
+    scale {
+        28;
+    }
+}
+
+material CircleWhite {
+    albedo {
+        vec3(0.92, 0.95, 1.0);
+    }
+    roughness {
+        0.08;
+    }
+    metallic {
+        0.0;
+    }
+}
+
+voxel Circle size = vec3(3.0, 0.4, 3.0) {
+    shape Disc radius = 1.15 {
+        segment Floor depth = 0.35 {
+            if d < 0.25 {
+                CircleWhite;
+            }
+        }
+    }
+}
+
+place Circle at = vec3(0.0, 0.0, 0.0);

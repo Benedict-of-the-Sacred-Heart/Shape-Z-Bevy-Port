@@ -28,7 +28,16 @@ fn cli() -> Command {
                 .value_parser(clap::value_parser!(usize)),
         )
         .arg(arg!(--watch "Watches the source file and recompiles on change"))
-        .subcommand(Command::new("render").about("Render to PNG (default)"))
+        .subcommand(
+            Command::new("render")
+                .about("Render to PNG (default)")
+                .arg(
+                    arg!(-i --iter <N> "Path-tracing iterations")
+                        .value_parser(clap::value_parser!(usize)),
+                )
+                .arg(arg!(-r --resolution <RES> "Output resolution (WIDTHxHEIGHT)"))
+                .arg(arg!(--watch "Watches the source file and recompiles on change")),
+        )
         .subcommand(
             Command::new("polygonize")
                 .about("Polygonize to OBJ")
@@ -171,27 +180,67 @@ fn watch_and_render(
 fn main() {
     let matches = cli().get_matches();
 
-    let iterations = *matches.get_one::<usize>("iter").unwrap();
-    let polygonize = matches.subcommand_name() == Some("polygonize");
-    let watch = matches.get_flag("watch");
-
-    let (width, height) = matches
+    let default_iters = *matches.get_one::<usize>("iter").unwrap();
+    let (default_width, default_height) = matches
         .get_one::<String>("resolution")
-        .and_then(|r| {
-            r.split_once('x')
-                .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
-        })
+        .and_then(|r| parse_resolution(r.as_str()))
         .unwrap_or((800, 800));
+    let default_watch = matches.get_flag("watch");
 
     let path = PathBuf::from(matches.get_one::<String>("FILE").unwrap());
 
+    if let Some((sub, sub_matches)) = matches.subcommand() {
+        match sub {
+            "render" => {
+                let iterations = sub_matches
+                    .get_one::<usize>("iter")
+                    .copied()
+                    .unwrap_or(default_iters);
+                let (width, height) = sub_matches
+                    .get_one::<String>("resolution")
+                    .and_then(|r| parse_resolution(r.as_str()))
+                    .unwrap_or((default_width, default_height));
+                let watch = sub_matches.get_flag("watch") || default_watch;
+
+                dispatch_render(path, false, width, height, iterations, watch);
+            }
+            "polygonize" => {
+                dispatch_render(path, true, default_width, default_height, default_iters, default_watch);
+            }
+            _ => {}
+        }
+    } else {
+        dispatch_render(path, false, default_width, default_height, default_iters, default_watch);
+    }
+}
+
+fn parse_resolution(res: &str) -> Option<(usize, usize)> {
+    res.split_once('x').and_then(|(w, h)| {
+        Some((w.parse().ok()?, h.parse().ok()?))
+    })
+}
+
+fn dispatch_render(
+    path: PathBuf,
+    polygonize: bool,
+    width: usize,
+    height: usize,
+    iterations: usize,
+    watch: bool,
+) {
     if watch {
         watch_and_render(path, polygonize, width, height, iterations);
     } else {
         let running = AtomicBool::new(true);
-        let (_tx, dummy_rx) = channel(); // unused without --watch
+        let (_tx, dummy_rx) = channel();
         let _ = run_render(
-            &path, polygonize, width, height, iterations, &running, &dummy_rx,
+            &path,
+            polygonize,
+            width,
+            height,
+            iterations,
+            &running,
+            &dummy_rx,
         );
     }
 }

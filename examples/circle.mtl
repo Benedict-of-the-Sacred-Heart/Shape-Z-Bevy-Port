@@ -1,0 +1,7 @@
+# materials for circle.obj
+newmtl material_0
+Kd 0.900 0.540 0.540
+
+newmtl material_5
+Kd 0.900 0.735 0.540
+
