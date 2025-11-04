@@ -1,11 +1,8 @@
-use bevy::{
-    prelude::*,
-    math::Vec3,
-    render::render_resource::PrimitiveTopology,
-    asset::RenderAssetUsages,
-};
 use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::Color as BevyColor;
+use bevy::{
+    asset::RenderAssetUsages, math::Vec3, prelude::*, render::render_resource::PrimitiveTopology,
+};
 use shapezlib::shapez::ShapeZ;
 
 #[derive(Resource, Default)]
@@ -22,7 +19,10 @@ pub struct ShapeZVolume {
 
 impl ShapeZVolume {
     pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
-        Self { path: path.into(), spawned: false }
+        Self {
+            path: path.into(),
+            spawned: false,
+        }
     }
 }
 
@@ -42,7 +42,9 @@ fn spawn_shapez_meshes(
     mut q: Query<(Entity, &mut ShapeZVolume)>,
 ) {
     for (entity, mut vol) in &mut q {
-        if vol.spawned { continue; }
+        if vol.spawned {
+            continue;
+        }
 
         let path = vol.path.clone();
         let mut engine = ShapeZ::default();
@@ -53,7 +55,8 @@ fn spawn_shapez_meshes(
                     let (positions, indices, face_mats) = engine.mesh_triangles();
                     if !positions.is_empty() && !indices.is_empty() {
                         // Group triangles by material id and spawn child entities per material
-                        let grouped = triangles_grouped_by_material(&positions, &indices, &face_mats);
+                        let grouped =
+                            triangles_grouped_by_material(&positions, &indices, &face_mats);
                         let mut parent = cmds.entity(entity);
                         for (mat_id, (pos, norm)) in grouped {
                             let mesh = build_mesh(&pos, &norm);
@@ -105,8 +108,12 @@ fn triangles_grouped_by_material(
         let v1 = Vec3::from_array(positions[i1]);
         let v2 = Vec3::from_array(positions[i2]);
         let n = (v1 - v0).cross(v2 - v0).normalize_or_zero().to_array();
-        pos_out.push(positions[i0]); pos_out.push(positions[i1]); pos_out.push(positions[i2]);
-        norm_out.push(n); norm_out.push(n); norm_out.push(n);
+        pos_out.push(positions[i0]);
+        pos_out.push(positions[i1]);
+        pos_out.push(positions[i2]);
+        norm_out.push(n);
+        norm_out.push(n);
+        norm_out.push(n);
     }
     map
 }

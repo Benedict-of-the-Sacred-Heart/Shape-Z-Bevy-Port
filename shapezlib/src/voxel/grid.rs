@@ -233,7 +233,8 @@ impl VoxelGrid {
 
             // Approximate memory usage:
             mem_bytes += std::mem::size_of_val(tile); // base tile
-            mem_bytes += tile.voxels.capacity() * std::mem::size_of::<Option<Voxel>>(); // voxel buffer
+            mem_bytes += tile.voxels.capacity() * std::mem::size_of::<Option<Voxel>>();
+            // voxel buffer
         }
 
         mem_bytes += self.tiles.capacity()
@@ -279,7 +280,7 @@ impl VoxelGrid {
                 let mut lro = ray.at(t);
                 lro -= i; // subtract tile origin
                 lro *= tile.density as f32; // scale to voxel grid
-                // lro -= rd * 0.01;
+                                            // lro -= rd * 0.01;
 
                 if !tile.is_empty() {
                     hit.distance = t;

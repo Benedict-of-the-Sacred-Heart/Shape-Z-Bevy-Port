@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use rand::{Rng, rngs::ThreadRng};
+use rand::{rngs::ThreadRng, Rng};
 
 const INV_PI: f32 = std::f32::consts::FRAC_1_PI;
 
@@ -235,7 +235,11 @@ impl BSDFLightSampleRec {
 }
 
 pub fn face_forward(a: Vec3<f32>, b: Vec3<f32>) -> Vec3<f32> {
-    if a.dot(b) < 0.0 { -b } else { b }
+    if a.dot(b) < 0.0 {
+        -b
+    } else {
+        b
+    }
 }
 
 pub fn luminance(c: Vec3<f32>) -> f32 {

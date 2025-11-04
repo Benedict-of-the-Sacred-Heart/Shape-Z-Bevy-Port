@@ -1,7 +1,7 @@
 use crate::prelude::*;
 
 use fast_surface_nets::ndshape::{RuntimeShape, Shape};
-use fast_surface_nets::{SurfaceNetsBuffer, surface_nets};
+use fast_surface_nets::{surface_nets, SurfaceNetsBuffer};
 
 use std::collections::HashMap;
 use std::fs::File;

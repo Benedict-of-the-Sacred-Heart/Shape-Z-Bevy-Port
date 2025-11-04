@@ -36,7 +36,11 @@ pub struct GpuScene {
 }
 
 impl GpuScene {
-    pub fn from_scene(device: &wgpu::Device, queue: &wgpu::Queue, scene: &SceneDescription) -> Self {
+    pub fn from_scene(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scene: &SceneDescription,
+    ) -> Self {
         let camera_uniform = camera_uniform_from(&scene.camera);
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Uniform Buffer"),
@@ -44,11 +48,7 @@ impl GpuScene {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let gpu_materials: Vec<GpuMaterial> = scene
-            .materials
-            .iter()
-            .map(material_to_gpu)
-            .collect();
+        let gpu_materials: Vec<GpuMaterial> = scene.materials.iter().map(material_to_gpu).collect();
 
         let materials_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Materials Buffer"),
@@ -110,8 +110,18 @@ fn camera_uniform_from(camera: &Camera) -> CameraUniform {
 
 fn material_to_gpu(mat: &Material) -> GpuMaterial {
     GpuMaterial {
-        base_color_and_roughness: [mat.base_color[0], mat.base_color[1], mat.base_color[2], mat.roughness],
-        emission_and_metallic: [mat.emission[0], mat.emission[1], mat.emission[2], mat.metallic],
+        base_color_and_roughness: [
+            mat.base_color[0],
+            mat.base_color[1],
+            mat.base_color[2],
+            mat.roughness,
+        ],
+        emission_and_metallic: [
+            mat.emission[0],
+            mat.emission[1],
+            mat.emission[2],
+            mat.metallic,
+        ],
         misc: [mat.shader_model as f32, 0.0, 0.0, 0.0],
     }
 }

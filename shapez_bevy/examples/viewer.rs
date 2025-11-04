@@ -1,12 +1,15 @@
-use bevy::prelude::*;
 use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
+use bevy::prelude::*;
 use shapez_bevy::{ShapeZPlugin, ShapeZVolume};
 use std::f32::consts::FRAC_PI_2;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: "Shape-Z Bevy Viewer".into(), ..default() }),
+            primary_window: Some(Window {
+                title: "Shape-Z Bevy Viewer".into(),
+                ..default()
+            }),
             ..default()
         }))
         .add_plugins(ShapeZPlugin)
@@ -29,7 +32,11 @@ fn spawn_camera_light(mut cmds: Commands) {
     ));
 
     cmds.spawn((
-        DirectionalLight { shadows_enabled: true, illuminance: 20000.0, ..default() },
+        DirectionalLight {
+            shadows_enabled: true,
+            illuminance: 20000.0,
+            ..default()
+        },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.9, 0.8, 0.0)),
         GlobalTransform::default(),
         Visibility::default(),
@@ -59,7 +66,12 @@ struct OrbitCamera {
 
 impl OrbitCamera {
     fn new(focus: Vec3, radius: f32, yaw: f32, pitch: f32) -> Self {
-        Self { focus, radius, yaw, pitch }
+        Self {
+            focus,
+            radius,
+            yaw,
+            pitch,
+        }
     }
 
     fn to_transform(&self) -> Transform {
@@ -102,7 +114,8 @@ fn orbit_camera_controls(
         scroll_delta += scroll_amount;
     }
 
-    if rotation_delta == Vec2::ZERO && pan_delta == Vec2::ZERO && scroll_delta.abs() <= f32::EPSILON {
+    if rotation_delta == Vec2::ZERO && pan_delta == Vec2::ZERO && scroll_delta.abs() <= f32::EPSILON
+    {
         return;
     }
 

@@ -4,7 +4,6 @@
 /// materials, voxel grid) but are designed to be populated directly from Rust
 /// code instead of the Shape-Z DSL. The intent is to serialize these structures
 /// into GPU buffers/textures before dispatching compute shaders.
-
 /// Convenience alias for 3D vectors stored as floats.
 pub type Vec3 = [f32; 3];
 
@@ -59,19 +58,10 @@ impl Default for Material {
 }
 
 /// Minimal voxel payload matching the CPU tracer's expectations.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Voxel {
     pub material: u8,
     pub volumetric_id: Option<u8>,
-}
-
-impl Default for Voxel {
-    fn default() -> Self {
-        Self {
-            material: 0,
-            volumetric_id: None,
-        }
-    }
 }
 
 /// Dense voxel volume storing `Voxel` values in Z-major order.

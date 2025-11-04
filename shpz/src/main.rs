@@ -205,19 +205,32 @@ fn main() {
                 dispatch_render(path, false, width, height, iterations, watch);
             }
             "polygonize" => {
-                dispatch_render(path, true, default_width, default_height, default_iters, default_watch);
+                dispatch_render(
+                    path,
+                    true,
+                    default_width,
+                    default_height,
+                    default_iters,
+                    default_watch,
+                );
             }
             _ => {}
         }
     } else {
-        dispatch_render(path, false, default_width, default_height, default_iters, default_watch);
+        dispatch_render(
+            path,
+            false,
+            default_width,
+            default_height,
+            default_iters,
+            default_watch,
+        );
     }
 }
 
 fn parse_resolution(res: &str) -> Option<(usize, usize)> {
-    res.split_once('x').and_then(|(w, h)| {
-        Some((w.parse().ok()?, h.parse().ok()?))
-    })
+    res.split_once('x')
+        .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
 }
 
 fn dispatch_render(
@@ -234,13 +247,7 @@ fn dispatch_render(
         let running = AtomicBool::new(true);
         let (_tx, dummy_rx) = channel();
         let _ = run_render(
-            &path,
-            polygonize,
-            width,
-            height,
-            iterations,
-            &running,
-            &dummy_rx,
+            &path, polygonize, width, height, iterations, &running, &dummy_rx,
         );
     }
 }

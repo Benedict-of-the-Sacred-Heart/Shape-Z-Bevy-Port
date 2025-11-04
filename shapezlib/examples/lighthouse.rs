@@ -1,8 +1,6 @@
 use std::{
     collections::BTreeSet,
-    env,
-    fs,
-    io,
+    env, fs, io,
     path::{Path, PathBuf},
     time::Instant,
 };
@@ -34,10 +32,7 @@ fn main() {
 
     let output_dir = output_dir();
     if let Err(err) = fs::create_dir_all(&output_dir) {
-        eprintln!(
-            "Failed to create output directory {:?}: {err}",
-            output_dir
-        );
+        eprintln!("Failed to create output directory {:?}: {err}", output_dir);
         return;
     }
     println!("Outputs will be written to {:?}", output_dir);
@@ -63,14 +58,21 @@ fn main() {
 
     let execute_started = Instant::now();
     engine.execute();
-    println!("Executed voxel program in {:.2?}", execute_started.elapsed());
+    println!(
+        "Executed voxel program in {:.2?}",
+        execute_started.elapsed()
+    );
 
     let (voxels, memory) = engine.stats();
     println!("Scene stats: {voxels}, {memory}");
 
     let (positions, indices, face_materials) = engine.mesh_triangles();
     let triangle_count = indices.len() / 3;
-    let unique_materials = face_materials.iter().copied().collect::<BTreeSet<_>>().len();
+    let unique_materials = face_materials
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .len();
     println!(
         "Mesh summary: {} vertices, {} triangles, {} materials",
         positions.len(),
@@ -79,7 +81,10 @@ fn main() {
     );
 
     if options.write_obj {
-        println!("Writing OBJ + MTL and moving them into {:?} ...", output_dir);
+        println!(
+            "Writing OBJ + MTL and moving them into {:?} ...",
+            output_dir
+        );
         engine.write_obj();
 
         let obj_path = scene_path.with_extension("obj");
@@ -160,7 +165,10 @@ fn parse_options() -> Result<Options, ParseOutcome> {
         return Err(ParseOutcome::Error(format!("Unrecognized argument: {arg}")));
     }
 
-    Ok(Options { write_obj, render_iterations })
+    Ok(Options {
+        write_obj,
+        render_iterations,
+    })
 }
 
 fn find_lighthouse_scene() -> Option<PathBuf> {
@@ -183,7 +191,9 @@ fn find_lighthouse_scene() -> Option<PathBuf> {
 fn print_usage() {
     println!("Usage: cargo run -p shapezlib --example lighthouse [--write-obj] [--render=N]");
     println!("\nFlags:");
-    println!("  --write-obj   Export an OBJ+MTL next to the .shpz scene (overwrites existing file).");
+    println!(
+        "  --write-obj   Export an OBJ+MTL next to the .shpz scene (overwrites existing file)."
+    );
     println!(
         "  --render=N    Run N progressive render iterations and overwrite the PNG next to the scene."
     );
