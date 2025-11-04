@@ -39,6 +39,15 @@ Shape-Z is ideal for game developers, artists, and procedural generation enthusi
 
 For examples and documentation please visit the [Website](https://shape-z.com).
 
+### Run the lighthouse example (pure Rust)
+
+```
+cargo run -p shapezlib --example lighthouse [--write-obj] [--render=N]
+```
+
+- `--write-obj` exports an OBJ + MTL next to `examples/lighthouse.shpz`.
+- `--render=N` performs `N` progressive render iterations and overwrites the PNG next to the scene.
+
 ## License
 
 Shape-Z is dual-licensed under the same terms as Rust:

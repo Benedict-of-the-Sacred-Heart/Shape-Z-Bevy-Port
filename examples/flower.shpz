@@ -1,0 +1,171 @@
+config density {
+    130;
+}
+
+config background {
+    vec3(0.15, 0.16, 0.22);
+}
+
+config sun_dir {
+    vec3(0.4, 0.95, 0.55);
+}
+
+config sun_emission {
+    vec3(4.2, 3.8, 3.0);
+}
+
+camera Isometric {
+    center {
+        vec3(0.0, 0.6, 0.0);
+    }
+    scale {
+        18;
+    }
+}
+
+material PetalMain {
+    albedo {
+        vec3(1.04, 0.64, 0.84);
+    }
+    roughness {
+        0.22;
+    }
+}
+
+material PetalAccent {
+    albedo {
+        vec3(1.16, 0.78, 0.94);
+    }
+    roughness {
+        0.18;
+    }
+}
+
+material FlowerCenter {
+    albedo {
+        vec3(1.0, 0.8, 0.32);
+    }
+    roughness {
+        0.28;
+    }
+}
+
+material StemGreen {
+    albedo {
+        vec3(0.18, 0.5, 0.28);
+    }
+    roughness {
+        0.58;
+    }
+}
+
+material LeafGreen {
+    albedo {
+        vec3(0.24, 0.68, 0.36);
+    }
+    roughness {
+        0.5;
+    }
+}
+
+material SoilBrown {
+    albedo {
+        vec3(0.34, 0.22, 0.16);
+    }
+    roughness {
+        0.85;
+    }
+}
+
+material PotTerracotta {
+    albedo {
+        vec3(0.78, 0.44, 0.26);
+    }
+    roughness {
+        0.45;
+    }
+}
+
+voxel Pot size = vec3(2.4, 1.4, 2.4) {
+    shape Disc radius = 0.9 {
+        segment Floor depth = 0.85 {
+            if d < 0.18 {
+                PotTerracotta;
+            }
+
+            if d >= 0.18 && d < 0.7 {
+                if inside > 0.72 && inside < 0.9 {
+                    PotTerracotta;
+                }
+
+                if inside < 0.7 {
+                    SoilBrown;
+                }
+            }
+
+            if d >= 0.7 && d < 0.82 {
+                if inside > 0.68 && inside < 0.9 {
+                    PotTerracotta;
+                }
+            }
+        }
+    }
+}
+
+voxel Stem size = vec3(1.0, 2.0, 1.0) {
+    shape Disc radius = 0.22 {
+        segment Floor depth = 1.4 {
+            if d < 1.2 {
+                StemGreen;
+            }
+        }
+    }
+
+    distance Box at = vec3(0.25, 0.36, 0.5), size = vec3(0.5, 0.12, 0.26), rounding = 0.22 {
+        volume {
+            LeafGreen;
+        }
+    }
+
+    distance Box at = vec3(0.75, 0.58, 0.46), size = vec3(0.5, 0.12, 0.24), rounding = 0.22 {
+        volume {
+            LeafGreen;
+        }
+    }
+}
+
+voxel Bloom size = vec3(2.0, 0.9, 2.0) {
+    shape Disc radius = 0.9 {
+        segment Floor depth = 0.5 {
+            let du = (u - 0.5) * 2.0;
+            let dv = (v - 0.5) * 2.0;
+            let radius = sqrt(du * du + dv * dv);
+            let angle = atan2(dv, du);
+            let petals = (1.0 + cos(angle * 6.0)) * 0.5;
+            let inner = 0.38 + petals * 0.18;
+            let outer = 0.66 + petals * 0.22;
+
+            if radius < outer {
+                if radius > inner {
+                    PetalMain;
+                } else {
+                    PetalAccent;
+                }
+            }
+
+            if radius < 0.18 {
+                FlowerCenter;
+            }
+        }
+    }
+
+    segment Floor depth = 0.12 {
+        if inside < 0.22 {
+            FlowerCenter;
+        }
+    }
+}
+
+place Pot at = vec3(0.0, -0.42, 0.0);
+place Stem at = vec3(0.0, 0.2, 0.0);
+place Bloom at = vec3(0.0, 0.96, 0.0);

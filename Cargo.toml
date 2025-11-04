@@ -1,5 +1,5 @@
 [workspace]
 
-members = ["shapezlib", "shpz", "shapez_bevy"]
+members = ["shapezlib", "shpz", "shapez_bevy", "shapez_gpu"]
 
 resolver = "2"

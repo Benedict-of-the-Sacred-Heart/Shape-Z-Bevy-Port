@@ -1,0 +1,25 @@
+# materials for lighthouse.obj
+newmtl material_0
+Kd 0.900 0.540 0.540
+
+newmtl material_3
+Kd 0.900 0.540 0.855
+
+newmtl material_5
+Kd 0.900 0.735 0.540
+
+newmtl material_6
+Kd 0.630 0.540 0.900
+
+newmtl material_7
+Kd 0.555 0.900 0.540
+
+newmtl material_9
+Kd 0.540 0.765 0.900
+
+newmtl material_10
+Kd 0.870 0.900 0.540
+
+newmtl material_11
+Kd 0.824 0.540 0.900
+

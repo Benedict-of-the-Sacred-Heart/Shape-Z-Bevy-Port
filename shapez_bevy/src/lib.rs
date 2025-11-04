@@ -1,8 +1,12 @@
 use bevy::{
     prelude::*,
-    render::mesh::{Indices, Mesh, PrimitiveTopology},
+    math::Vec3,
+    render::render_resource::PrimitiveTopology,
+    asset::RenderAssetUsages,
 };
-use shapezlib::prelude::*;
+use bevy::pbr::MeshMaterial3d;
+use bevy::prelude::Color as BevyColor;
+use shapezlib::shapez::ShapeZ;
 
 #[derive(Resource, Default)]
 pub struct ShapeZSettings {
@@ -46,16 +50,33 @@ fn spawn_shapez_meshes(
             Ok(module) => {
                 if engine.compile(&module).is_ok() {
                     engine.execute();
-                    let (positions, indices, _mats) = engine.mesh_triangles();
+                    let (positions, indices, face_mats) = engine.mesh_triangles();
                     if !positions.is_empty() && !indices.is_empty() {
-                        let mut mesh = triangles_to_mesh(&positions, &indices);
-                        let mesh_handle = meshes.add(mesh);
-                        let mat_handle = materials.add(StandardMaterial::default());
-                        cmds.entity(entity).insert(PbrBundle {
-                            mesh: mesh_handle,
-                            material: mat_handle,
-                            ..Default::default()
-                        });
+                        // Group triangles by material id and spawn child entities per material
+                        let grouped = triangles_grouped_by_material(&positions, &indices, &face_mats);
+                        let mut parent = cmds.entity(entity);
+                        for (mat_id, (pos, norm)) in grouped {
+                            let mesh = build_mesh(&pos, &norm);
+                            let mesh_handle = meshes.add(mesh);
+                            let color = material_color(mat_id);
+                            let mat_handle = materials.add(StandardMaterial {
+                                base_color: color,
+                                perceptual_roughness: 0.6,
+                                metallic: 0.0,
+                                cull_mode: None,
+                                ..Default::default()
+                            });
+                            parent.with_children(|c| {
+                                c.spawn((
+                                    Mesh3d(mesh_handle.clone()),
+                                    MeshMaterial3d(mat_handle.clone()),
+                                    Transform::from_translation(Vec3::Y * -0.2),
+                                    GlobalTransform::default(),
+                                    Visibility::default(),
+                                    InheritedVisibility::default(),
+                                ));
+                            });
+                        }
                         vol.spawned = true;
                     }
                 }
@@ -67,31 +88,60 @@ fn spawn_shapez_meshes(
     }
 }
 
-fn triangles_to_mesh(positions: &[[f32; 3]], indices: &[u32]) -> Mesh {
-    let mut normals = vec![[0.0f32; 3]; positions.len()];
-
-    for tri in indices.chunks_exact(3) {
+fn triangles_grouped_by_material(
+    positions: &[[f32; 3]],
+    indices: &[u32],
+    face_mats: &[u8],
+) -> std::collections::BTreeMap<u8, (Vec<[f32; 3]>, Vec<[f32; 3]>)> {
+    use std::collections::BTreeMap;
+    let mut map: BTreeMap<u8, (Vec<[f32; 3]>, Vec<[f32; 3]>)> = BTreeMap::new();
+    for (tri_idx, tri) in indices.chunks_exact(3).enumerate() {
+        let mat = face_mats.get(tri_idx).copied().unwrap_or(0);
+        let (pos_out, norm_out) = map.entry(mat).or_insert_with(|| (Vec::new(), Vec::new()));
         let i0 = tri[0] as usize;
         let i1 = tri[1] as usize;
         let i2 = tri[2] as usize;
-        let v0 = glam::Vec3::from(positions[i0]);
-        let v1 = glam::Vec3::from(positions[i1]);
-        let v2 = glam::Vec3::from(positions[i2]);
-        let n = (v1 - v0).cross(v2 - v0);
-        for i in [i0, i1, i2] { 
-            let a = &mut normals[i];
-            a[0] += n.x; a[1] += n.y; a[2] += n.z; 
-        }
+        let v0 = Vec3::from_array(positions[i0]);
+        let v1 = Vec3::from_array(positions[i1]);
+        let v2 = Vec3::from_array(positions[i2]);
+        let n = (v1 - v0).cross(v2 - v0).normalize_or_zero().to_array();
+        pos_out.push(positions[i0]); pos_out.push(positions[i1]); pos_out.push(positions[i2]);
+        norm_out.push(n); norm_out.push(n); norm_out.push(n);
     }
-    for n in &mut normals {
-        let v = glam::Vec3::from(*n);
-        let nn = if v.length_squared() > 0.0 { v.normalize() } else { glam::Vec3::Z };
-        *n = nn.into();
-    }
+    map
+}
 
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions.to_vec());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.set_indices(Some(Indices::U32(indices.to_vec())));
+fn build_mesh(out_positions: &[[f32; 3]], out_normals: &[[f32; 3]]) -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, out_positions.to_vec());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, out_normals.to_vec());
     mesh
+}
+
+fn material_color(id: u8) -> BevyColor {
+    // Deterministic palette based on id (simple HSV hue mapping)
+    let h = (id as f32 * 0.1618) % 1.0; // golden ratio fraction for spread
+    let s = 0.6;
+    let v = 0.9;
+    hsv_to_rgb(h, s, v)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> BevyColor {
+    let i = (h * 6.0).floor();
+    let f = h * 6.0 - i;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - f * s);
+    let t = v * (1.0 - (1.0 - f) * s);
+    let (r, g, b) = match i as i32 % 6 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    BevyColor::srgb(r, g, b)
 }

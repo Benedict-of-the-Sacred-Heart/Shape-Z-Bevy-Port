@@ -35,7 +35,7 @@ material CircleWhite {
     }
 }
 
-voxel Circle size = vec3(3.0, 0.4, 3.0) {
+voxel CircleBase size = vec3(3.0, 0.4, 3.0) {
     shape Disc radius = 1.15 {
         segment Floor depth = 0.35 {
             if d < 0.25 {
@@ -45,4 +45,15 @@ voxel Circle size = vec3(3.0, 0.4, 3.0) {
     }
 }
 
-place Circle at = vec3(0.0, 0.0, 0.0);
+voxel CircleTop size = vec3(3.0, 0.4, 3.0) {
+    shape Disc radius = 1.15 {
+        segment Floor depth = 0.35 {
+            if d < 0.25 {
+                CircleWhite;
+            }
+        }
+    }
+}
+
+place CircleBase at = vec3(0.0, -0.2, 0.0);
+place CircleTop at = vec3(0.0, 0.2, 0.0);
