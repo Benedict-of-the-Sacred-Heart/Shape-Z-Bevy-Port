@@ -261,4 +261,20 @@ impl ShapeZ {
     pub fn imported_paths(&self) -> Vec<PathBuf> {
         self.context.imported_paths.clone()
     }
+
+    /// Share the current voxel grid for downstream consumers (e.g. GPU upload).
+    pub fn voxel_grid(&self) -> Arc<RwLock<VoxelGrid>> {
+        self.context.program.grid.clone()
+    }
+
+    /// List of volumetric material identifiers referenced by the scene.
+    pub fn volumetric_material_ids(&self) -> Vec<u8> {
+        self.context
+            .program
+            .grid
+            .read()
+            .unwrap()
+            .volumetric
+            .clone()
+    }
 }

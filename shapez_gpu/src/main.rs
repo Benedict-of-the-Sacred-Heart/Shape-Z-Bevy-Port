@@ -1,43 +1,44 @@
+use std::{
+    num::NonZeroU32,
+    path::PathBuf,
+    sync::{mpsc, Arc},
+};
+
 use argh::FromArgs;
 use bytemuck::{Pod, Zeroable};
+use image::{ImageBuffer, Rgba};
 use shapez_gpu::{
     gpu_scene::GpuScene,
     scene::{SceneBuilder, Voxel},
 };
-use std::sync::Arc;
 use wgpu::util::DeviceExt;
-use winit::{
-    event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-};
 
 #[derive(FromArgs, Debug)]
 /// Shape-Z GPU prototype runner.
 pub struct Args {
-    /// window width
+    /// output image width
     #[argh(option, default = "800")]
     pub width: u32,
-    /// window height
+    /// output image height
     #[argh(option, default = "600")]
     pub height: u32,
+    /// where to write the rendered PNG
+    #[argh(option)]
+    pub output: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
     let args: Args = argh::from_env();
-    let event_loop = EventLoop::new()?;
-    let window = WindowBuilder::new()
-        .with_title("Shape-Z GPU Prototype")
-        .with_inner_size(winit::dpi::PhysicalSize::new(args.width, args.height))
-        .build(&event_loop)?;
-
-    let window = Arc::new(window);
+    let output_path = args
+        .output
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("shapez_gpu.png"));
 
     let instance = wgpu::Instance::default();
-    let surface = instance.create_surface(window.as_ref())?;
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: Some(&surface),
+        compatible_surface: None,
         force_fallback_adapter: false,
     }))
     .ok_or_else(|| anyhow::anyhow!("No suitable GPU adapters found."))?;
@@ -51,25 +52,8 @@ fn main() -> anyhow::Result<()> {
         None,
     ))?;
 
-    let surface_caps = surface.get_capabilities(&adapter);
-    let surface_format = surface_caps
-        .formats
-        .iter()
-        .copied()
-        .find(|f| f.is_srgb())
-        .unwrap_or(surface_caps.formats[0]);
-
-    let mut config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format: surface_format,
-        width: args.width,
-        height: args.height,
-        present_mode: surface_caps.present_modes[0],
-        alpha_mode: surface_caps.alpha_modes[0],
-        view_formats: vec![],
-        desired_maximum_frame_latency: 2,
-    };
-    surface.configure(&device, &config);
+    let image_width = args.width;
+    let image_height = args.height;
 
     // Temporary native scene example; this will later feed GPU buffers.
     let scene = SceneBuilder::new([32, 32, 32])
@@ -165,8 +149,8 @@ fn main() -> anyhow::Result<()> {
     let scene_ubo = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Scene UBO"),
         contents: bytemuck::bytes_of(&build_scene_constants(
-            config.width,
-            config.height,
+            image_width,
+            image_height,
             frame_index,
             samples_per_dispatch,
             &gpu_scene,
@@ -174,17 +158,8 @@ fn main() -> anyhow::Result<()> {
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
-    // Accumulation texture (rgba16float, storage + sampleable)
-    let accum_format = wgpu::TextureFormat::Rgba16Float;
-    let display_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("Display Sampler"),
-        address_mode_u: wgpu::AddressMode::ClampToEdge,
-        address_mode_v: wgpu::AddressMode::ClampToEdge,
-        address_mode_w: wgpu::AddressMode::ClampToEdge,
-        mag_filter: wgpu::FilterMode::Nearest,
-        min_filter: wgpu::FilterMode::Nearest,
-        ..Default::default()
-    });
+    // Accumulation texture (rgba32float, storage)
+    let accum_format = wgpu::TextureFormat::Rgba32Float;
 
     // Compute pipeline (path tracer)
     let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -287,351 +262,157 @@ fn main() -> anyhow::Result<()> {
         module: &compute_shader,
         entry_point: "path_trace",
     });
-
-    // Display pipeline (fullscreen sample of accumulation texture)
-    let display_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("Display Shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("display.wgsl").into()),
+    // Prepare storage buffers
+    let pixel_count = (image_width * image_height) as usize;
+    let sample_counts = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Sample Counts"),
+        size: (pixel_count * std::mem::size_of::<u32>()) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
     });
+    let rng_state = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("RNG State"),
+        size: (pixel_count * std::mem::size_of::<u32>()) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let seeds: Vec<u32> = (0..pixel_count as u32).map(|i| i ^ 0xA2C2A3E9).collect();
+    queue.write_buffer(&rng_state, 0, bytemuck::cast_slice(&seeds));
+    let zeros = vec![0u32; pixel_count];
+    queue.write_buffer(&sample_counts, 0, bytemuck::cast_slice(&zeros));
 
-    let display_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Display BGL"),
+    let accum_tex = create_accum_texture(&device, accum_format, image_width, image_height);
+    let accum_view = accum_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+    let compute_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Compute BG"),
+        layout: &compute_bgl,
         entries: &[
-            wgpu::BindGroupLayoutEntry {
+            wgpu::BindGroupEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                },
-                count: None,
+                resource: scene_ubo.as_entire_binding(),
             },
-            wgpu::BindGroupLayoutEntry {
+            wgpu::BindGroupEntry {
                 binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                count: None,
+                resource: gpu_scene.camera_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&accum_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: sample_counts.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: rng_state.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: gpu_scene.materials_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: gpu_scene.voxels_buffer.as_entire_binding(),
             },
         ],
     });
 
-    let display_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Display Layout"),
-        bind_group_layouts: &[&display_bgl],
-        push_constant_ranges: &[],
-    });
-
-    let display_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("Display Pipeline"),
-        layout: Some(&display_pipeline_layout),
-        vertex: wgpu::VertexState {
-            module: &display_shader,
-            entry_point: "vs_main",
-            buffers: &[],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &display_shader,
-            entry_point: "fs_main",
-            targets: &[Some(wgpu::ColorTargetState {
-                format: surface_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview: None,
-    });
-
-    struct FrameResources {
-        _accum_tex: wgpu::Texture,
-        _accum_view: wgpu::TextureView,
-        _sample_counts: wgpu::Buffer,
-        _rng_state: wgpu::Buffer,
-        compute_bg: wgpu::BindGroup,
-        display_bg: wgpu::BindGroup,
-    }
-
-    impl FrameResources {
-        fn new(
-            device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            config: &wgpu::SurfaceConfiguration,
-            accum_format: wgpu::TextureFormat,
-            display_bgl: &wgpu::BindGroupLayout,
-            compute_bgl: &wgpu::BindGroupLayout,
-            display_sampler: &wgpu::Sampler,
-            scene_ubo: &wgpu::Buffer,
-            gpu_scene: &GpuScene,
-        ) -> Self {
-            let pixel_count = (config.width * config.height) as usize;
-            let sample_counts = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Sample Counts"),
-                size: (pixel_count * std::mem::size_of::<u32>()) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let rng_state = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("RNG State"),
-                size: (pixel_count * std::mem::size_of::<u32>()) as u64,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let seeds: Vec<u32> = (0..pixel_count as u32).map(|i| i ^ 0xA2C2A3E9).collect();
-            queue.write_buffer(&rng_state, 0, bytemuck::cast_slice(&seeds));
-            let zeros = vec![0u32; pixel_count];
-            queue.write_buffer(&sample_counts, 0, bytemuck::cast_slice(&zeros));
-
-            let accum_tex = create_accum_texture(device, accum_format, config.width, config.height);
-            let accum_view = accum_tex.create_view(&wgpu::TextureViewDescriptor::default());
-            let display_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Display BG"),
-                layout: display_bgl,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&accum_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(display_sampler),
-                    },
-                ],
-            });
-            let compute_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Compute BG"),
-                layout: compute_bgl,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: scene_ubo.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: gpu_scene.camera_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&accum_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: sample_counts.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: rng_state.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: gpu_scene.materials_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: gpu_scene.voxels_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-
-            Self {
-                _accum_tex: accum_tex,
-                _accum_view: accum_view,
-                _sample_counts: sample_counts,
-                _rng_state: rng_state,
-                compute_bg,
-                display_bg,
-            }
-        }
-
-        fn rebuild(
-            &mut self,
-            device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            config: &wgpu::SurfaceConfiguration,
-            accum_format: wgpu::TextureFormat,
-            display_bgl: &wgpu::BindGroupLayout,
-            compute_bgl: &wgpu::BindGroupLayout,
-            display_sampler: &wgpu::Sampler,
-            scene_ubo: &wgpu::Buffer,
-            gpu_scene: &GpuScene,
-        ) {
-            *self = Self::new(
-                device,
-                queue,
-                config,
-                accum_format,
-                display_bgl,
-                compute_bgl,
-                display_sampler,
-                scene_ubo,
-                gpu_scene,
-            );
-        }
-    }
-
-    let mut frame_resources = FrameResources::new(
-        &device,
+    // Dispatch compute once for now
+    write_scene_constants(
         &queue,
-        &config,
-        accum_format,
-        &display_bgl,
-        &compute_bgl,
-        &display_sampler,
         &scene_ubo,
+        image_width,
+        image_height,
+        frame_index,
+        samples_per_dispatch,
         &gpu_scene,
     );
-    let window_for_loop = Arc::clone(&window);
-    let surface = Arc::new(surface);
-    let gpu_scene_for_loop = Arc::clone(&gpu_scene);
 
-    event_loop.run(move |event, target| {
-        target.set_control_flow(ControlFlow::Poll);
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("Headless Encoder"),
+    });
 
-        match event {
-            Event::WindowEvent { window_id, event } if window_id == window_for_loop.id() => {
-                match event {
-                    WindowEvent::CloseRequested => target.exit(),
-                    WindowEvent::Resized(new_size) => {
-                        if new_size.width > 0 && new_size.height > 0 {
-                            config.width = new_size.width;
-                            config.height = new_size.height;
-                            surface.configure(&device, &config);
-                            frame_index = 0;
-                            write_scene_constants(
-                                &queue,
-                                &scene_ubo,
-                                config.width,
-                                config.height,
-                                frame_index,
-                                samples_per_dispatch,
-                                &gpu_scene_for_loop,
-                            );
-                            frame_resources.rebuild(
-                                &device,
-                                &queue,
-                                &config,
-                                accum_format,
-                                &display_bgl,
-                                &compute_bgl,
-                                &display_sampler,
-                                &scene_ubo,
-                                &gpu_scene_for_loop,
-                            );
-                        }
-                    }
-                    WindowEvent::ScaleFactorChanged {
-                        scale_factor: _,
-                        mut inner_size_writer,
-                    } => {
-                        let current_size = window_for_loop.inner_size();
-                        let _ = inner_size_writer.request_inner_size(current_size);
-                        if current_size.width > 0 && current_size.height > 0 {
-                            config.width = current_size.width;
-                            config.height = current_size.height;
-                            surface.configure(&device, &config);
-                            frame_index = 0;
-                            write_scene_constants(
-                                &queue,
-                                &scene_ubo,
-                                config.width,
-                                config.height,
-                                frame_index,
-                                samples_per_dispatch,
-                                &gpu_scene_for_loop,
-                            );
-                            frame_resources.rebuild(
-                                &device,
-                                &queue,
-                                &config,
-                                accum_format,
-                                &display_bgl,
-                                &compute_bgl,
-                                &display_sampler,
-                                &scene_ubo,
-                                &gpu_scene_for_loop,
-                            );
-                        }
-                    }
-                    WindowEvent::RedrawRequested => {
-                        frame_index = frame_index.wrapping_add(1);
-                        write_scene_constants(
-                            &queue,
-                            &scene_ubo,
-                            config.width,
-                            config.height,
-                            frame_index,
-                            samples_per_dispatch,
-                            &gpu_scene_for_loop,
-                        );
+    {
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Path Trace Pass"),
+            timestamp_writes: None,
+        });
+        cpass.set_pipeline(&compute_pipeline);
+        cpass.set_bind_group(0, &compute_bg, &[]);
+        let wg_x = image_width.div_ceil(8);
+        let wg_y = image_height.div_ceil(8);
+        cpass.dispatch_workgroups(wg_x, wg_y, 1);
+    }
 
-                        match surface.get_current_texture() {
-                            Ok(frame) => {
-                                let view = frame
-                                    .texture
-                                    .create_view(&wgpu::TextureViewDescriptor::default());
-                                let mut encoder = device.create_command_encoder(
-                                    &wgpu::CommandEncoderDescriptor {
-                                        label: Some("Render Encoder"),
-                                    },
-                                );
+    // Copy accumulation texture into a staging buffer for readback
+    let output_buffer_size = (pixel_count * std::mem::size_of::<[f32; 4]>()) as u64;
+    let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Readback Buffer"),
+        size: output_buffer_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
 
-                                {
-                                    let mut cpass =
-                                        encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                            label: Some("Path Trace Pass"),
-                                            timestamp_writes: None,
-                                        });
-                                    cpass.set_pipeline(&compute_pipeline);
-                                    cpass.set_bind_group(0, &frame_resources.compute_bg, &[]);
-                                    let wg_x = config.width.div_ceil(8);
-                                    let wg_y = config.height.div_ceil(8);
-                                    cpass.dispatch_workgroups(wg_x, wg_y, 1);
-                                }
+    encoder.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture {
+            texture: &accum_tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::ImageCopyBuffer {
+            buffer: &readback_buffer,
+            layout: wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(image_width * 16),
+                rows_per_image: Some(image_height),
+            },
+        },
+        wgpu::Extent3d {
+            width: image_width,
+            height: image_height,
+            depth_or_array_layers: 1,
+        },
+    );
 
-                                {
-                                    let mut pass =
-                                        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                            label: Some("Display Pass"),
-                                            color_attachments: &[Some(
-                                                wgpu::RenderPassColorAttachment {
-                                                    view: &view,
-                                                    resolve_target: None,
-                                                    ops: wgpu::Operations {
-                                                        load: wgpu::LoadOp::Clear(
-                                                            wgpu::Color::BLACK,
-                                                        ),
-                                                        store: wgpu::StoreOp::Store,
-                                                    },
-                                                },
-                                            )],
-                                            depth_stencil_attachment: None,
-                                            timestamp_writes: None,
-                                            occlusion_query_set: None,
-                                        });
-                                    pass.set_pipeline(&display_pipeline);
-                                    pass.set_bind_group(0, &frame_resources.display_bg, &[]);
-                                    pass.draw(0..3, 0..1);
-                                }
+    queue.submit(std::iter::once(encoder.finish()));
 
-                                queue.submit(std::iter::once(encoder.finish()));
-                                frame.present();
-                            }
-                            Err(wgpu::SurfaceError::Lost) => surface.configure(&device, &config),
-                            Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
-                            Err(_) => {}
-                        }
-                    }
-                    _ => {}
-                }
+    // Read back
+    {
+        let buffer_slice = readback_buffer.slice(..);
+        let (tx, rx) = mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |res| {
+            tx.send(res).expect("map_async callback send failed");
+        });
+        device.poll(wgpu::Maintain::Wait);
+        let map_result = rx.recv().map_err(|_| anyhow::anyhow!("failed to receive map result"))?;
+        map_result.map_err(|_| anyhow::anyhow!("failed to map readback buffer"))?;
+        let data = buffer_slice.get_mapped_range();
+        let floats: &[f32] = bytemuck::cast_slice(&data);
+        let mut img = ImageBuffer::<Rgba<u8>, Vec<u8>>::new(image_width, image_height);
+        for y in 0..image_height {
+            for x in 0..image_width {
+                let idx = ((y * image_width + x) * 4) as usize;
+                let r = floats[idx];
+                let g = floats[idx + 1];
+                let b = floats[idx + 2];
+                let color = [
+                    (r.clamp(0.0, 1.0) * 255.0) as u8,
+                    (g.clamp(0.0, 1.0) * 255.0) as u8,
+                    (b.clamp(0.0, 1.0) * 255.0) as u8,
+                    255,
+                ];
+                img.put_pixel(x, y, Rgba(color));
             }
-            Event::AboutToWait => {
-                window_for_loop.request_redraw();
-            }
-            _ => {}
         }
-    })?;
+        img.save(&output_path)?;
+        drop(data);
+        readback_buffer.unmap();
+    }
+
+    println!("wrote {:?}", output_path);
 
     Ok(())
 }

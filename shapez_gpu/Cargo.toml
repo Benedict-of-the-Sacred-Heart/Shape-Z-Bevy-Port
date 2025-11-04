@@ -9,6 +9,7 @@ authors = ["Shape-Z Contributors"]
 argh = "0.1"
 pollster = "0.3"
 wgpu = { version = "0.19" }
-winit = "0.29"
 anyhow = "1"
 bytemuck = { version = "1", features = ["derive"] }
+image = { version = "0.24", default-features = false, features = ["png"] }
+shapezlib = { path = "../shapezlib" }
